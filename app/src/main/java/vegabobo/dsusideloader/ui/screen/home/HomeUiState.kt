@@ -1,6 +1,14 @@
 package vegabobo.dsusideloader.ui.screen.home
 
+import android.net.Uri
 import vegabobo.dsusideloader.preparation.InstallationStep
+
+data class PartitionSelectionState(
+    val partitionName: String,
+    val fileName: String,
+    val fileSize: Long = 0L,
+    val uri: Uri = Uri.EMPTY,
+)
 
 data class InstallationCardState(
     val installationStep: InstallationStep = InstallationStep.NOT_INSTALLING,
@@ -54,6 +62,8 @@ data class HomeUiState(
     val installationLogs: String = "",
     val passedInitialChecks: Boolean = false,
     val shouldKeepScreenOn: Boolean = false,
+    val isMultiPartitionMode: Boolean = false,
+    val selectedPartitions: List<PartitionSelectionState> = emptyList(),
 ) {
     fun isInstalling(): Boolean {
         return installationCard.installationStep != InstallationStep.NOT_INSTALLING

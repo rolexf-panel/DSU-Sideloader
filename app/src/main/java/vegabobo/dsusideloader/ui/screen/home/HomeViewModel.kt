@@ -28,6 +28,7 @@ import vegabobo.dsusideloader.installer.privileged.LogcatDiagnostic
 import vegabobo.dsusideloader.installer.root.DSUInstaller
 import vegabobo.dsusideloader.model.DSUInstallationSource
 import vegabobo.dsusideloader.model.Session
+import vegabobo.dsusideloader.model.Type
 import vegabobo.dsusideloader.preferences.AppPrefs
 import vegabobo.dsusideloader.preparation.InstallationStep
 import vegabobo.dsusideloader.preparation.Preparation
@@ -90,6 +91,16 @@ class HomeViewModel @Inject constructor(
             it.copy(
                 installationCard = InstallationCardState(),
                 sheetDisplay = SheetDisplayState.NONE,
+            )
+        }
+
+    fun resetToInitialState() =
+        _uiState.update {
+            it.copy(
+                installationCard = InstallationCardState(),
+                sheetDisplay = SheetDisplayState.NONE,
+                isMultiPartitionMode = false,
+                selectedPartitions = emptyList(),
             )
         }
 
@@ -185,6 +196,97 @@ class HomeViewModel @Inject constructor(
     }
 
     //
+    // Multi-Partition Mode
+    //
+
+    fun toggleMultiPartitionMode() {
+        val newMode = !uiState.value.isMultiPartitionMode
+        session.userSelection.isMultiPartitionMode = newMode
+        if (!newMode) {
+            session.userSelection.clearPartitions()
+        }
+        _uiState.update {
+            it.copy(
+                isMultiPartitionMode = newMode,
+                selectedPartitions = if (newMode) it.selectedPartitions else emptyList(),
+            )
+        }
+    }
+
+    fun inferPartitionName(filename: String): String {
+        var name = filename
+        val stripExtensions = listOf(".gz", ".gzip", ".xz", ".img")
+        for (ext in stripExtensions) {
+            if (name.endsWith(ext, ignoreCase = true)) {
+                name = name.substring(0, name.length - ext.length)
+            }
+        }
+        return if (name.isNotEmpty()) name else filename
+    }
+
+    fun addPartition(uri: Uri) {
+        val filename = FilenameUtils.queryName(application.contentResolver, uri)
+        val extension = filename.substringAfterLast(".", "")
+        val supportedFiles = mutableListOf("gz", "xz", "img", "gzip")
+        if (Build.VERSION.SDK_INT > 29) {
+            supportedFiles.add("zip")
+        }
+        if (!supportedFiles.contains(extension)) {
+            viewModelScope.launch {
+                updateInstallationCard { it.copy(isError = true, isTextFieldEnabled = false) }
+                delay(2000)
+                updateInstallationCard { it.copy(isError = false, isTextFieldEnabled = true) }
+            }
+            return
+        }
+        val partitionName = inferPartitionName(filename)
+        session.userSelection.addPartition(uri, partitionName)
+        val partitions = session.userSelection.selectedPartitions.map {
+            PartitionSelectionState(
+                partitionName = it.partitionName,
+                fileName = storageManager.getFilenameFromUri(it.uri),
+                fileSize = it.fileSize,
+                uri = it.uri,
+            )
+        }
+        _uiState.update { it.copy(selectedPartitions = partitions) }
+    }
+
+    fun removePartition(index: Int) {
+        session.userSelection.removePartition(index)
+        val partitions = session.userSelection.selectedPartitions.map {
+            PartitionSelectionState(
+                partitionName = it.partitionName,
+                fileName = storageManager.getFilenameFromUri(it.uri),
+                fileSize = it.fileSize,
+                uri = it.uri,
+            )
+        }
+        _uiState.update { it.copy(selectedPartitions = partitions) }
+    }
+
+    fun updatePartitionName(index: Int, newName: String) {
+        session.userSelection.updatePartitionName(index, newName)
+        val partitions = session.userSelection.selectedPartitions.map {
+            PartitionSelectionState(
+                partitionName = it.partitionName,
+                fileName = storageManager.getFilenameFromUri(it.uri),
+                fileSize = it.fileSize,
+                uri = it.uri,
+            )
+        }
+        _uiState.update { it.copy(selectedPartitions = partitions) }
+    }
+
+    fun onAddPartitionResult(uri: Uri) {
+        if (uiState.value.isMultiPartitionMode) {
+            addPartition(uri)
+        } else {
+            onFileSelectionResult(uri)
+        }
+    }
+
+    //
     // Installation
     //
 
@@ -199,6 +301,11 @@ class HomeViewModel @Inject constructor(
     fun onClickInstall() {
         session.userSelection.setUserDataSize(uiState.value.userDataCard.text)
         session.userSelection.setImageSize(uiState.value.imageSizeCard.text)
+        if (uiState.value.isMultiPartitionMode) {
+            if (session.userSelection.selectedPartitions.isEmpty()) {
+                return
+            }
+        }
         updateSheetState(SheetDisplayState.CONFIRM_INSTALLATION)
     }
 
@@ -245,11 +352,38 @@ class HomeViewModel @Inject constructor(
     }
 
     private fun setupAdbInstallation() {
+        if (session.dsuInstallation.type == Type.MULTIPLE_IMAGES) {
+            val zipUri = createTempZipForDSU()
+            if (zipUri != null) {
+                session.dsuInstallation.uri = zipUri
+                session.dsuInstallation.fileSize = storageManager.getFilesizeFromUri(zipUri)
+            }
+        }
         AdbInstallationHandler(storageManager, session).generate { scriptPath ->
             Log.d(tag, "Installation script generated: $scriptPath")
             session.installationScriptPath = scriptPath
             resetInstallationCard()
             updateInstallationCard { it.copy(installationStep = InstallationStep.REQUIRES_ADB_CMD_TO_CONTINUE) }
+        }
+    }
+
+    private fun createTempZipForDSU(): Uri? {
+        return try {
+            val zipFile = storageManager.createDocumentFile("dsu_package_${System.currentTimeMillis()}.zip")
+            val zipOutputStream = java.util.zip.ZipOutputStream(storageManager.openOutputStream(zipFile.uri))
+            for (image in session.dsuInstallation.images) {
+                val entryName = "${image.partitionName}.img"
+                zipOutputStream.putNextEntry(java.util.zip.ZipEntry(entryName))
+                val inputStream = storageManager.openInputStream(image.uri)
+                inputStream.copyTo(zipOutputStream)
+                inputStream.close()
+                zipOutputStream.closeEntry()
+            }
+            zipOutputStream.close()
+            zipFile.uri
+        } catch (e: Exception) {
+            Log.e(tag, "Failed to create temp DSU package for ADB: ${e.message}")
+            null
         }
     }
 
@@ -269,7 +403,7 @@ class HomeViewModel @Inject constructor(
 
     private fun startPrivilegedInstallation() {
         updateInstallationCard { it.copy(installationStep = InstallationStep.WAITING_USER_CONFIRMATION) }
-        DsuInstallationHandler(session).startInstallation()
+        DsuInstallationHandler(session, storageManager).startInstallation()
         if (session.isRoot() || OperationModeUtils.isReadLogsPermissionGranted(application)) {
             startLogging()
         } else {
@@ -328,6 +462,8 @@ class HomeViewModel @Inject constructor(
             installationJob.cancel()
         }
         session.dsuInstallation = DSUInstallationSource()
+        session.userSelection.clearPartitions()
+        _uiState.update { it.copy(selectedPartitions = emptyList()) }
     }
 
     //

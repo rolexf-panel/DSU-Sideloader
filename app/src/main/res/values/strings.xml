@@ -241,4 +241,17 @@
 
     <string name="close_app">Close app</string>
     <string name="close_app_question">Close app?</string>
+
+    <!--
+        Multi-partition strings
+    -->
+
+    <string name="switch_multi_partition">Switch to Multi Partition</string>
+    <string name="switch_single_image">Switch to Single Image</string>
+    <string name="multi_partition">Multi Partition</string>
+    <string name="add_partition">Add Partition</string>
+    <string name="remove">Remove</string>
+    <string name="partition_name">Partition name</string>
+    <string name="partitions_to_install">Partitions to install</string>
+    <string name="total_size">Total size</string>
 </resources>

@@ -6,6 +6,7 @@ import kotlinx.coroutines.Job
 import vegabobo.dsusideloader.core.StorageManager
 import vegabobo.dsusideloader.model.DSUConstants
 import vegabobo.dsusideloader.model.DSUInstallationSource
+import vegabobo.dsusideloader.model.ImagePartition
 import vegabobo.dsusideloader.model.Session
 
 class Preparation(
@@ -23,7 +24,15 @@ class Preparation(
 
     override fun invoke() {
         if (session.preferences.useBuiltinInstaller && session.isRoot()) {
+            if (session.userSelection.isMultiPartitionMode) {
+                prepareMultipleRooted()
+                return
+            }
             prepareRooted()
+            return
+        }
+        if (session.userSelection.isMultiPartitionMode) {
+            prepareMultipleForDSU()
             return
         }
         prepareForDSU()
@@ -154,6 +163,66 @@ class Preparation(
         val extractedFilePair =
             FileUnPacker(storageManager, uri, outputFile, job, onPreparationProgressUpdate).unpack()
         return Pair(uri, extractedFilePair.second)
+    }
+
+    private fun prepareMultipleRooted() {
+        val processedImages = mutableListOf<ImagePartition>()
+        for (image in session.userSelection.selectedPartitions) {
+            if (job.isCancelled) break
+            val uri = image.uri
+            val partitionName = image.partitionName
+            val extension = getExtension(uri)
+            val result: Pair<Uri, Long> = when (extension) {
+                "img" -> Pair(uri, storageManager.getFilesizeFromUri(uri))
+                "xz", "gz", "gzip" -> extractFile(uri, partitionName)
+                else -> throw Exception("Unsupported filetype: $extension")
+            }
+            processedImages.add(
+                ImagePartition(
+                    partitionName = partitionName,
+                    uri = result.first,
+                    fileSize = result.second,
+                ),
+            )
+        }
+        if (!job.isCancelled) {
+            onPreparationFinished(DSUInstallationSource.MultipleImages(processedImages))
+        } else {
+            onCanceled()
+        }
+    }
+
+    private fun prepareMultipleForDSU() {
+        storageManager.cleanWorkspaceFolder(true)
+        val processedImages = mutableListOf<ImagePartition>()
+        for (image in session.userSelection.selectedPartitions) {
+            if (job.isCancelled) break
+            val uri = image.uri
+            val partitionName = image.partitionName
+            val extension = getExtension(uri)
+            val result: Pair<Uri, Long> = when (extension) {
+                "xz" -> prepareXz(uri)
+                "img" -> prepareImage(uri)
+                "gz", "gzip" -> prepareGz(uri)
+                else -> throw Exception("Unsupported filetype: $extension")
+            }
+            processedImages.add(
+                ImagePartition(
+                    partitionName = partitionName,
+                    uri = result.first,
+                    fileSize = result.second,
+                ),
+            )
+        }
+
+        onStepUpdate(InstallationStep.WAITING_USER_CONFIRMATION)
+        storageManager.cleanWorkspaceFolder(job.isCancelled)
+
+        if (!job.isCancelled) {
+            onPreparationFinished(DSUInstallationSource.MultipleImages(processedImages))
+        } else {
+            onCanceled()
+        }
     }
 
     private fun extractFile(uri: Uri): Pair<Uri, Long> {

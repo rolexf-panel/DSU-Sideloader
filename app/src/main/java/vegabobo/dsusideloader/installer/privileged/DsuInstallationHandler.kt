@@ -1,14 +1,20 @@
 package vegabobo.dsusideloader.installer.privileged
 
 import android.content.Intent
+import android.net.Uri
 import android.os.storage.VolumeInfo
 import android.util.Log
+import java.io.InputStream
+import java.util.zip.ZipEntry
+import java.util.zip.ZipOutputStream
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import vegabobo.dsusideloader.core.StorageManager
 import vegabobo.dsusideloader.model.Session
+import vegabobo.dsusideloader.model.Type
 import vegabobo.dsusideloader.service.PrivilegedProvider
 
 /**
@@ -17,6 +23,7 @@ import vegabobo.dsusideloader.service.PrivilegedProvider
  */
 open class DsuInstallationHandler(
     private val session: Session,
+    private val storageManager: StorageManager? = null,
 ) {
 
     private val tag = this.javaClass.simpleName
@@ -25,7 +32,36 @@ open class DsuInstallationHandler(
         if (session.preferences.isUnmountSdCard) {
             unmountSdTemporary()
         }
+        if (session.dsuInstallation.type == Type.MULTIPLE_IMAGES && storageManager != null) {
+            val zipUri = createTempDsuPackage()
+            if (zipUri != null) {
+                session.dsuInstallation.uri = zipUri
+                session.dsuInstallation.fileSize = storageManager.getFilesizeFromUri(zipUri)
+            }
+        }
         forwardInstallationToDSU()
+    }
+
+    private fun createTempDsuPackage(): Uri? {
+        try {
+            val zipFile = storageManager!!.createDocumentFile("dsu_package_${System.currentTimeMillis()}.zip")
+            val zipOutputStream = ZipOutputStream(storageManager.openOutputStream(zipFile.uri))
+            for (image in session.dsuInstallation.images) {
+                val entryName = "${image.partitionName}.img"
+                zipOutputStream.putNextEntry(ZipEntry(entryName))
+                val inputStream: InputStream = storageManager.openInputStream(image.uri)
+                inputStream.copyTo(zipOutputStream)
+                inputStream.close()
+                zipOutputStream.closeEntry()
+                Log.d(tag, "Added $entryName to temp DSU package")
+            }
+            zipOutputStream.close()
+            Log.d(tag, "Temp DSU package created: ${zipFile.uri}")
+            return zipFile.uri
+        } catch (e: Exception) {
+            Log.e(tag, "Failed to create temp DSU package: ${e.message}")
+            return null
+        }
     }
 
     private fun forwardInstallationToDSU() {

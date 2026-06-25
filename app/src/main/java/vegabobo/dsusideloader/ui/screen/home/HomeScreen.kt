@@ -1,15 +1,34 @@
 package vegabobo.dsusideloader.ui.screen.home
 
+import android.content.Intent
+import android.net.Uri
 import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.res.stringResource
@@ -29,7 +48,9 @@ import vegabobo.dsusideloader.ui.cards.warnings.StorageWarningCard
 import vegabobo.dsusideloader.ui.cards.warnings.UnlockedBootloaderCard
 import vegabobo.dsusideloader.ui.cards.warnings.UnsupportedCard
 import vegabobo.dsusideloader.ui.components.ApplicationScreen
+import vegabobo.dsusideloader.ui.components.CardBox
 import vegabobo.dsusideloader.ui.components.TopBar
+import vegabobo.dsusideloader.ui.components.buttons.SecondaryButton
 import vegabobo.dsusideloader.ui.screen.Destinations
 import vegabobo.dsusideloader.ui.sdialogs.CancelSheet
 import vegabobo.dsusideloader.ui.sdialogs.ConfirmInstallationSheet
@@ -37,6 +58,7 @@ import vegabobo.dsusideloader.ui.sdialogs.DiscardDSUSheet
 import vegabobo.dsusideloader.ui.sdialogs.ImageSizeWarningSheet
 import vegabobo.dsusideloader.ui.sdialogs.ViewLogsBottomSheet
 import vegabobo.dsusideloader.ui.util.KeepScreenOn
+import vegabobo.dsusideloader.ui.util.launcherAcResult
 import vegabobo.dsusideloader.util.collectAsStateWithLifecycle
 
 object HomeLinks {
@@ -55,6 +77,10 @@ fun Home(
 
     if (uiState.shouldKeepScreenOn) {
         KeepScreenOn()
+    }
+
+    val launcherAddPartition = launcherAcResult { uri: Uri ->
+        homeViewModel.onAddPartitionResult(uri)
     }
 
     LaunchedEffect(Unit) {
@@ -109,22 +135,59 @@ fun Home(
                 }
             }
             if (uiState.passedInitialChecks && uiState.additionalCard == AdditionalCardState.NONE) {
-                InstallationCard(
-                    uiState = uiState.installationCard,
-                    onClickInstall = { homeViewModel.onClickInstall() },
-                    onClickUnmountSdCardAndRetry = { homeViewModel.onClickUnmountSdCardAndRetry() },
-                    onClickSetSeLinuxPermissive = { homeViewModel.onClickSetSeLinuxPermissive() },
-                    onClickRetryInstallation = { homeViewModel.onClickRetryInstallation() },
-                    onClickClear = { homeViewModel.resetInstallationCard() },
-                    onSelectFileSuccess = { homeViewModel.onFileSelectionResult(it) },
-                    onClickCancelInstallation = { homeViewModel.onClickCancel() },
-                    onClickDiscardInstalledGsiAndInstall = { homeViewModel.onClickDiscardGsiAndStartInstallation() },
-                    onClickDiscardDsu = { homeViewModel.showDiscardSheet() },
-                    onClickRebootToDynOS = { homeViewModel.onClickRebootToDynOS() },
-                    onClickViewLogs = { homeViewModel.showLogsWarning() },
-                    onClickViewCommands = { navigate(Destinations.ADBInstallation) },
-                    minPercentageOfFreeStorage = homeViewModel.allocPercentageInt.toString(),
-                )
+                if (uiState.isMultiPartitionMode) {
+                    MultiPartitionCard(
+                        partitions = uiState.selectedPartitions,
+                        onAddPartition = {
+                            val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+                                type = "*/*"
+                                putExtra(
+                                    Intent.EXTRA_MIME_TYPES,
+                                    arrayOf(
+                                        "application/gzip",
+                                        "application/x-gzip",
+                                        "application/x-xz",
+                                        "application/octet-stream",
+                                    ),
+                                )
+                            }
+                            launcherAddPartition.launch(intent)
+                        },
+                        onRemovePartition = { homeViewModel.removePartition(it) },
+                        onUpdatePartitionName = { index, name -> homeViewModel.updatePartitionName(index, name) },
+                        onClickInstall = { homeViewModel.onClickInstall() },
+                    )
+                } else {
+                    InstallationCard(
+                        uiState = uiState.installationCard,
+                        onClickInstall = { homeViewModel.onClickInstall() },
+                        onClickUnmountSdCardAndRetry = { homeViewModel.onClickUnmountSdCardAndRetry() },
+                        onClickSetSeLinuxPermissive = { homeViewModel.onClickSetSeLinuxPermissive() },
+                        onClickRetryInstallation = { homeViewModel.onClickRetryInstallation() },
+                        onClickClear = { homeViewModel.resetInstallationCard() },
+                        onSelectFileSuccess = { homeViewModel.onFileSelectionResult(it) },
+                        onClickCancelInstallation = { homeViewModel.onClickCancel() },
+                        onClickDiscardInstalledGsiAndInstall = { homeViewModel.onClickDiscardGsiAndStartInstallation() },
+                        onClickDiscardDsu = { homeViewModel.showDiscardSheet() },
+                        onClickRebootToDynOS = { homeViewModel.onClickRebootToDynOS() },
+                        onClickViewLogs = { homeViewModel.showLogsWarning() },
+                        onClickViewCommands = { navigate(Destinations.ADBInstallation) },
+                        minPercentageOfFreeStorage = homeViewModel.allocPercentageInt.toString(),
+                    )
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.Center,
+                ) {
+                    SecondaryButton(
+                        text = if (uiState.isMultiPartitionMode) {
+                            stringResource(R.string.switch_single_image)
+                        } else {
+                            stringResource(R.string.switch_multi_partition)
+                        },
+                        onClick = { homeViewModel.toggleMultiPartitionMode() },
+                    )
+                }
                 UserdataCard(
                     isEnabled = uiState.isInstalling(),
                     uiState = uiState.userDataCard,
@@ -151,6 +214,8 @@ fun Home(
                 filename = homeViewModel.obtainSelectedFilename(),
                 userdata = homeViewModel.session.userSelection.getUserDataSizeAsGB(),
                 fileSize = homeViewModel.session.userSelection.userSelectedImageSize,
+                isMultiPartitionMode = uiState.isMultiPartitionMode,
+                partitions = uiState.selectedPartitions,
                 onClickConfirm = { homeViewModel.onConfirmInstallationSheet() },
                 onClickCancel = { homeViewModel.dismissSheet() },
             )
@@ -181,5 +246,82 @@ fun Home(
             )
 
         SheetDisplayState.NONE -> {}
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun MultiPartitionCard(
+    partitions: List<PartitionSelectionState>,
+    onAddPartition: () -> Unit,
+    onRemovePartition: (Int) -> Unit,
+    onUpdatePartitionName: (Int, String) -> Unit,
+    onClickInstall: () -> Unit,
+) {
+    CardBox(
+        cardTitle = stringResource(R.string.multi_partition),
+        addToggle = false,
+    ) {
+        partitions.forEachIndexed { index, partition ->
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 4.dp),
+                shape = RoundedCornerShape(8.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                ),
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        OutlinedTextField(
+                            value = partition.partitionName,
+                            onValueChange = { onUpdatePartitionName(index, it) },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth(),
+                            label = { Text(stringResource(R.string.partition_name)) },
+                        )
+                        Text(
+                            text = partition.fileName,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(top = 2.dp),
+                        )
+                    }
+                    IconButton(onClick = { onRemovePartition(index) }) {
+                        Icon(
+                            Icons.Filled.Close,
+                            contentDescription = stringResource(R.string.remove),
+                        )
+                    }
+                }
+            }
+        }
+        OutlinedButton(
+            onClick = onAddPartition,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 8.dp),
+        ) {
+            Icon(Icons.Filled.Add, contentDescription = null)
+            Spacer(modifier = Modifier.width(4.dp))
+            Text(stringResource(R.string.add_partition))
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.End,
+        ) {
+            Spacer(modifier = Modifier.weight(1f))
+            SecondaryButton(
+                text = stringResource(R.string.install),
+                onClick = onClickInstall,
+                isEnabled = partitions.isNotEmpty(),
+            )
+        }
     }
 }

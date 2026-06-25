@@ -16,6 +16,37 @@ class UserSelection(
     var selectedFileUri: Uri = Uri.EMPTY,
     var selectedFileName: String = "",
 ) {
+    var isMultiPartitionMode: Boolean = false
+    var selectedPartitions: MutableList<ImagePartition> = mutableListOf()
+
+    fun addPartition(uri: Uri, partitionName: String) {
+        if (selectedPartitions.any { it.partitionName == partitionName }) {
+            return
+        }
+        selectedPartitions.add(
+            ImagePartition(
+                partitionName = partitionName,
+                uri = uri,
+                fileSize = DSUConstants.DEFAULT_IMAGE_SIZE,
+            ),
+        )
+    }
+
+    fun removePartition(index: Int) {
+        if (index in selectedPartitions.indices) {
+            selectedPartitions.removeAt(index)
+        }
+    }
+
+    fun updatePartitionName(index: Int, newName: String) {
+        if (index in selectedPartitions.indices) {
+            selectedPartitions[index].partitionName = newName
+        }
+    }
+
+    fun clearPartitions() {
+        selectedPartitions.clear()
+    }
 
     fun getUserDataSizeAsGB(): String = "${(this.userSelectedUserdata / 1024L / 1024L / 1024L)}"
 
@@ -45,7 +76,9 @@ class UserSelection(
         return "UserSelection(userSelectedUserdata=$userSelectedUserdata, " +
             "userSelectedImageSize=$userSelectedImageSize, " +
             "selectedFileUri=$selectedFileUri, " +
-            "selectedFileName=$selectedFileName)"
+            "selectedFileName=$selectedFileName, " +
+            "isMultiPartitionMode=$isMultiPartitionMode, " +
+            "selectedPartitions=$selectedPartitions)"
     }
 }
 
